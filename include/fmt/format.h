@@ -249,6 +249,18 @@ FMT_CONSTEXPR inline void abort_fuzzing_if(bool condition) {
 #endif
 }
 
+template <typename CharT, CharT... C> struct string_literal {
+  static constexpr CharT value[sizeof...(C)] = {C...};
+  constexpr operator basic_string_view<CharT>() const {
+    return {value, sizeof...(C)};
+  }
+};
+
+#if FMT_CPLUSPLUS < 201703L
+template <typename CharT, CharT... C>
+constexpr CharT string_literal<CharT, C...>::value[sizeof...(C)];
+#endif
+
 template <typename Streambuf> class formatbuf : public Streambuf {
  private:
   using char_type = typename Streambuf::char_type;
@@ -1219,7 +1231,7 @@ FMT_CONSTEXPR20 auto format_decimal(Char* out, UInt value, int size)
 
 template <typename Char, typename UInt, typename Iterator,
           FMT_ENABLE_IF(!std::is_pointer<remove_cvref_t<Iterator>>::value)>
-inline auto format_decimal(Iterator out, UInt value, int size)
+FMT_CONSTEXPR inline auto format_decimal(Iterator out, UInt value, int size)
     -> format_decimal_result<Iterator> {
   // Buffer is large enough to hold all digits (digits10 + 1).
   Char buffer[digits10<UInt>() + 1];
@@ -1545,7 +1557,10 @@ FMT_CONSTEXPR inline fp get_cached_power(int min_exponent,
   const int dec_exp_step = 8;
   index = (index - first_dec_exp - 1) / dec_exp_step + 1;
   pow10_exponent = first_dec_exp + index * dec_exp_step;
-  return {data::pow10_significands[index], data::pow10_exponents[index]};
+  // Using *(x + index) instead of x[index] avoids an issue with some compilers
+  // using the EDG frontend (e.g. nvhpc/22.3 in C++17 mode).
+  return {*(data::pow10_significands + index),
+          *(data::pow10_exponents + index)};
 }
 
 #ifndef _MSC_VER
@@ -1726,18 +1741,18 @@ inline auto find_escape(const char* begin, const char* end)
   return result;
 }
 
-#define FMT_STRING_IMPL(s, base, explicit)                                 \
-  [] {                                                                     \
-    /* Use the hidden visibility as a workaround for a GCC bug (#1973). */ \
-    /* Use a macro-like name to avoid shadowing warnings. */               \
-    struct FMT_GCC_VISIBILITY_HIDDEN FMT_COMPILE_STRING : base {           \
-      using char_type = fmt::remove_cvref_t<decltype(s[0])>;               \
-      FMT_MAYBE_UNUSED FMT_CONSTEXPR explicit                              \
-      operator fmt::basic_string_view<char_type>() const {                 \
-        return fmt::detail_exported::compile_string_to_view<char_type>(s); \
-      }                                                                    \
-    };                                                                     \
-    return FMT_COMPILE_STRING();                                           \
+#define FMT_STRING_IMPL(s, base, explicit)                                    \
+  [] {                                                                        \
+    /* Use the hidden visibility as a workaround for a GCC bug (#1973). */    \
+    /* Use a macro-like name to avoid shadowing warnings. */                  \
+    struct FMT_GCC_VISIBILITY_HIDDEN FMT_COMPILE_STRING : base {              \
+      using char_type FMT_MAYBE_UNUSED = fmt::remove_cvref_t<decltype(s[0])>; \
+      FMT_MAYBE_UNUSED FMT_CONSTEXPR explicit                                 \
+      operator fmt::basic_string_view<char_type>() const {                    \
+        return fmt::detail_exported::compile_string_to_view<char_type>(s);    \
+      }                                                                       \
+    };                                                                        \
+    return FMT_COMPILE_STRING();                                              \
   }()
 
 /**
@@ -2125,29 +2140,29 @@ class counting_iterator {
   FMT_UNCHECKED_ITERATOR(counting_iterator);
 
   struct value_type {
-    template <typename T> void operator=(const T&) {}
+    template <typename T> FMT_CONSTEXPR void operator=(const T&) {}
   };
 
-  counting_iterator() : count_(0) {}
+  FMT_CONSTEXPR counting_iterator() : count_(0) {}
 
-  size_t count() const { return count_; }
+  FMT_CONSTEXPR size_t count() const { return count_; }
 
-  counting_iterator& operator++() {
+  FMT_CONSTEXPR counting_iterator& operator++() {
     ++count_;
     return *this;
   }
-  counting_iterator operator++(int) {
+  FMT_CONSTEXPR counting_iterator operator++(int) {
     auto it = *this;
     ++*this;
     return it;
   }
 
-  friend counting_iterator operator+(counting_iterator it, difference_type n) {
+  FMT_CONSTEXPR friend counting_iterator operator+(counting_iterator it, difference_type n) {
     it.count_ += static_cast<size_t>(n);
     return it;
   }
 
-  value_type operator*() const { return {}; }
+  FMT_CONSTEXPR value_type operator*() const { return {}; }
 };
 
 template <typename Char, typename OutputIt>
